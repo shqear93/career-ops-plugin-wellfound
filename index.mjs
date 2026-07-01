@@ -95,7 +95,7 @@ export default {
     },
 
     /** @param {any} entry @param {any} ctx */
-    async fetch(entry, ctx) {
+    fetch: async function fetchJobs(entry, ctx) {
       const searchUrl = entry.searchUrl || entry.careers_url;
       if (!searchUrl) throw new Error('wellfound: missing searchUrl in portals.yml entry');
       if (!isWellfoundUrl(searchUrl)) throw new Error(`wellfound: searchUrl "${searchUrl}" is not a wellfound.com URL`);
