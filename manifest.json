@@ -1,13 +1,13 @@
 {
   "id": "wellfound",
   "name": "career-ops-plugin-wellfound",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "apiVersion": 1,
-  "description": "Scrapes Wellfound's public job search HTML to surface global-remote engineering roles. Optionally uses a session cookie (WELLFOUND_COOKIE) for authenticated results.",
+  "description": "Scrapes Wellfound global-remote jobs via your real Chrome browser (CDP). Run auth.mjs once to authenticate and cache listings; plugin hook reads the cache instantly.",
   "hooks": ["ingest"],
   "requiredEnv": [],
-  "optionalEnv": ["WELLFOUND_COOKIE"],
-  "allowedHosts": ["wellfound.com"],
+  "optionalEnv": [],
+  "allowedHosts": [],
   "skill": "skill.md",
   "humanInTheLoop": true,
   "homepage": "https://github.com/shqear93/career-ops-plugin-wellfound"
