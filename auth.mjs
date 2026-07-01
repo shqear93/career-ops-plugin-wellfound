@@ -72,6 +72,12 @@ async function main() {
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   });
+
+  // Hide navigator.webdriver — the clearest automation signal
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+
   const page = await context.newPage();
 
   await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
