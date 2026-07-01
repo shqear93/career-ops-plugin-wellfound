@@ -4,34 +4,116 @@
 // Run once (or whenever the cookie expires):
 //   node plugins.local/wellfound/auth.mjs
 //
-// Opens a visible Chromium window. Log in to wellfound.com normally,
-// then come back here — the script detects login and saves the cookie automatically.
+// Opens your real Chrome (zero automation), you log in normally,
+// press Enter — script decrypts cookies from Chrome's SQLite store via Keychain.
 
-const { chromium } = await import('play' + 'wright');
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { execSync } from 'node:child_process';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline';
+import { homedir, platform } from 'node:os';
+import { pbkdf2Sync, createDecipheriv } from 'node:crypto';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// Walk up to find career-ops root (.env lives there, not in plugins.local/wellfound/)
 const ROOT = resolve(HERE, '..', '..');
 const ENV_PATH = resolve(ROOT, '.env');
-
 const LOGIN_URL = 'https://wellfound.com/login';
-const JOBS_URL = 'https://wellfound.com/jobs';
-const COOKIE_NAME_RE = /^(_wellfound_session|_session|remember_user_token|user_session)/;
-const POLL_MS = 1500;
-const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
-function readEnv(path) {
-  if (!existsSync(path)) return {};
-  const lines = readFileSync(path, 'utf8').split('\n');
-  const out = {};
-  for (const line of lines) {
-    const m = line.match(/^([^#=\s][^=]*)=(.*)$/);
-    if (m) out[m[1].trim()] = m[2].trim();
+function chromeCookiePath() {
+  const home = homedir();
+  if (platform() === 'darwin') return join(home, 'Library/Application Support/Google/Chrome/Default/Cookies');
+  if (platform() === 'linux') return join(home, '.config/google-chrome/Default/Cookies');
+  throw new Error('Unsupported OS — only macOS and Linux supported');
+}
+
+function openBrowser(url) {
+  if (platform() === 'darwin') execSync(`open -a "Google Chrome" "${url}"`);
+  else execSync(`xdg-open "${url}"`);
+}
+
+function prompt(question) {
+  return new Promise(res => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, a => { rl.close(); res(a); });
+  });
+}
+
+// Get Chrome's encryption key from macOS Keychain
+function getChromeKey() {
+  const password = execSync(
+    'security find-generic-password -a "Chrome" -s "Chrome Safe Storage" -w',
+    { encoding: 'utf8' }
+  ).trim();
+  // Chrome derives a 128-bit AES key via PBKDF2-SHA1, 1003 iterations, salt "saltysalt"
+  return pbkdf2Sync(password, 'saltysalt', 1003, 16, 'sha1');
+}
+
+// Decrypt a Chrome-encrypted cookie value (v10 prefix + AES-128-CBC)
+function decryptCookieValue(encryptedValue, key) {
+  if (!encryptedValue || encryptedValue.length === 0) return null;
+  const buf = Buffer.from(encryptedValue); // Uint8Array from node:sqlite → Buffer
+  if (buf.subarray(0, 3).toString() !== 'v10') return null;
+  const iv = Buffer.alloc(16, ' ');
+  const decipher = createDecipheriv('aes-128-cbc', key, iv);
+  decipher.setAutoPadding(true);
+  try {
+    const decrypted = Buffer.concat([decipher.update(buf.subarray(3)), decipher.final()]);
+    return decrypted.subarray(32).toString('utf8'); // skip 32-byte Chrome-internal prefix
+  } catch {
+    return null;
   }
-  return out;
+}
+
+async function readChromeCookies(domain) {
+  const dbPath = chromeCookiePath();
+  if (!existsSync(dbPath)) throw new Error(`Chrome cookie DB not found: ${dbPath}`);
+
+  const tmpPath = join('/tmp', `wellfound-cookies-${Date.now()}.db`);
+  copyFileSync(dbPath, tmpPath);
+
+  let rows = [];
+  try {
+    // Node 22+ built-in sqlite
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(tmpPath, { readonly: true });
+    rows = db.prepare(
+      `SELECT name, value, encrypted_value, host_key FROM cookies WHERE host_key LIKE ?`
+    ).all(`%${domain}%`);
+    db.close();
+  } catch {
+    // Fallback: sqlite3 CLI — outputs blob as hex with X'' prefix
+    try {
+      const out = execSync(
+        `sqlite3 "${tmpPath}" "SELECT name, value, hex(encrypted_value), host_key FROM cookies WHERE host_key LIKE '%${domain}%';"`,
+        { encoding: 'utf8' }
+      );
+      rows = out.trim().split('\n').filter(Boolean).map(line => {
+        const parts = line.split('|');
+        return {
+          name: parts[0],
+          value: parts[1],
+          encrypted_value: parts[2] ? Buffer.from(parts[2], 'hex') : null,
+          host_key: parts[3],
+        };
+      });
+    } catch {
+      throw new Error('sqlite3 not found — install it: brew install sqlite3');
+    }
+  } finally {
+    try { unlinkSync(tmpPath); } catch {}
+  }
+
+  const key = getChromeKey();
+
+  return rows
+    .map(r => {
+      const value = r.value && r.value.length > 0
+        ? r.value
+        : decryptCookieValue(r.encrypted_value, key);
+      return value ? { name: r.name, value } : null;
+    })
+    .filter(Boolean);
 }
 
 function writeEnv(path, vars) {
@@ -39,82 +121,32 @@ function writeEnv(path, vars) {
   for (const [key, value] of Object.entries(vars)) {
     const re = new RegExp(`^${key}=.*$`, 'm');
     const line = `${key}=${value}`;
-    if (re.test(content)) {
-      content = content.replace(re, line);
-    } else {
-      content = content.trimEnd() + (content ? '\n' : '') + line + '\n';
-    }
+    if (re.test(content)) content = content.replace(re, line);
+    else content = content.trimEnd() + (content ? '\n' : '') + line + '\n';
   }
   writeFileSync(path, content, 'utf8');
 }
 
-async function isLoggedIn(page) {
-  try {
-    const cookies = await page.context().cookies('https://wellfound.com');
-    return cookies.some(c => COOKIE_NAME_RE.test(c.name) && c.value.length > 10);
-  } catch {
-    return false;
-  }
-}
-
-function buildCookieHeader(cookies) {
-  return cookies
-    .filter(c => c.domain.includes('wellfound.com'))
-    .map(c => `${c.name}=${c.value}`)
-    .join('; ');
-}
-
 async function main() {
-  console.log('Opening browser — log in to Wellfound, then come back here.');
-  console.log('The window will close automatically once login is detected.\n');
+  console.log('Opening Wellfound in your real Chrome browser...');
+  console.log('Log in normally, then come back here and press Enter.\n');
 
-  const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  });
+  openBrowser(LOGIN_URL);
 
-  // Hide navigator.webdriver — the clearest automation signal
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  });
+  await prompt('Press Enter once you have logged in to Wellfound...');
 
-  const page = await context.newPage();
+  console.log('Reading and decrypting cookies from Chrome...');
+  const cookies = await readChromeCookies('wellfound.com');
 
-  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
-
-  const deadline = Date.now() + TIMEOUT_MS;
-  let loggedIn = false;
-
-  while (Date.now() < deadline) {
-    await page.waitForTimeout(POLL_MS);
-    if (await isLoggedIn(page)) {
-      loggedIn = true;
-      break;
-    }
-  }
-
-  if (!loggedIn) {
-    await browser.close();
-    console.error('Timed out waiting for login (5 minutes). Run the script again.');
+  if (!cookies.length) {
+    console.error('No Wellfound cookies found — make sure you are logged in and try again.');
     process.exit(1);
   }
 
-  // Navigate to jobs page to ensure all cookies are set
-  await page.goto(JOBS_URL, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(1000);
-
-  const cookies = await context.cookies('https://wellfound.com');
-  const cookieHeader = buildCookieHeader(cookies);
-
-  await browser.close();
-
-  if (!cookieHeader) {
-    console.error('Logged in but could not extract cookies. Try again.');
-    process.exit(1);
-  }
-
+  const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
   writeEnv(ENV_PATH, { WELLFOUND_COOKIE: cookieHeader });
-  console.log(`\n✓ Cookie saved to ${ENV_PATH}`);
+
+  console.log(`\n✓ ${cookies.length} cookies saved to ${ENV_PATH}`);
   console.log('  Run node scan.mjs to scan Wellfound jobs.');
 }
 
