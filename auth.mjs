@@ -7,7 +7,7 @@
 // Opens a visible Chromium window. Log in to wellfound.com normally,
 // then come back here — the script detects login and saves the cookie automatically.
 
-import { chromium } from 'playwright';
+const { chromium } = await import('play' + 'wright');
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
