@@ -1,34 +1,14 @@
 // @ts-check
 // Wellfound plugin — scrapes the public job search page to surface global-remote roles.
 //
-// Wellfound gates full results behind a login session. To get results:
-//   1. Log in to wellfound.com in your browser
-//   2. Copy your session cookie (e.g. from DevTools → Application → Cookies)
-//   3. Add WELLFOUND_COOKIE=<value> to your .env
-//
-// Without a cookie the provider still runs but returns fewer (or no) results.
-//
-// portals.yml entry:
-//   - name: Wellfound Remote Engineering
-//     provider: wellfound
-//     searchUrl: "https://wellfound.com/jobs?remote=true&keywords=platform+engineer&locationSlugs[]=everywhere"
-//     enabled: true
+// Setup:
+//   1. Run: node plugins.local/wellfound/auth.mjs
+//      (opens Chrome, log in, cookies saved to .env automatically)
+//   2. Run: node plugins.mjs run wellfound
+//      (fetches jobs and adds them to data/pipeline.md)
 
 const DEFAULT_TIMEOUT_MS = 20_000;
-const ALLOWED_HOSTS = /^(www\.)?wellfound\.com$/;
-
-/**
- * @param {string} rawUrl
- * @returns {boolean}
- */
-function isWellfoundUrl(rawUrl) {
-  try {
-    const { hostname } = new URL(rawUrl);
-    return ALLOWED_HOSTS.test(hostname);
-  } catch {
-    return false;
-  }
-}
+const SEARCH_URL = 'https://wellfound.com/jobs?remote=true&locationSlugs[]=everywhere';
 
 /**
  * @param {string} text
@@ -44,7 +24,7 @@ function parseSalary(text) {
 
 /**
  * @param {string} html
- * @returns {Array<{title: string, url: string, company: string, location: string, salary: {min:number,max:number,currency:string}|null}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string}>}
  */
 function parseJobsFromHtml(html) {
   const jobs = [];
@@ -72,54 +52,41 @@ function parseJobsFromHtml(html) {
     const contextStart = Math.max(0, match.index - 200);
     const contextEnd = Math.min(html.length, match.index + 400);
     const context = html.slice(contextStart, contextEnd);
-    const salary = parseSalary(context);
 
-    // Only keep jobs explicitly marked as global-remote
     const isGlobalRemote = /everywhere|remote only everywhere/i.test(context);
     if (!isGlobalRemote) continue;
 
-    jobs.push({ title, url, company: '', location: 'Remote · Everywhere', salary });
+    jobs.push({ title, url, company: '', location: 'Remote · Everywhere' });
   }
 
   return jobs;
 }
 
 export default {
-  provider: {
-    id: 'wellfound',
+  /** @param {any} ctx */
+  async ingest(ctx) {
+    const cookie = ctx?.env?.WELLFOUND_COOKIE || '';
+    if (!cookie) {
+      ctx.log('wellfound: no WELLFOUND_COOKIE set — run auth.mjs first');
+      return [];
+    }
 
-    /** @param {any} entry */
-    detect(entry) {
-      const raw = entry.careers_url || entry.searchUrl || '';
-      return isWellfoundUrl(raw) ? { url: raw } : null;
-    },
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cookie': cookie,
+    };
 
-    /** @param {any} entry @param {any} ctx */
-    fetch: async function fetchJobs(entry, ctx) {
-      const searchUrl = entry.searchUrl || entry.careers_url;
-      if (!searchUrl) throw new Error('wellfound: missing searchUrl in portals.yml entry');
-      if (!isWellfoundUrl(searchUrl)) throw new Error(`wellfound: searchUrl "${searchUrl}" is not a wellfound.com URL`);
+    const html = await ctx.fetchText(SEARCH_URL, {
+      headers,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    });
 
-      const cookie = ctx?.env?.WELLFOUND_COOKIE || '';
-      const headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'en-US,en;q=0.9',
-      };
-      if (cookie) headers['Cookie'] = cookie;
+    if (!html || html.length < 500) {
+      throw new Error('wellfound: response too short — cookie may have expired, run auth.mjs again');
+    }
 
-      const html = await ctx.fetchText(searchUrl, {
-        headers,
-        redirect: 'error',
-        timeoutMs: DEFAULT_TIMEOUT_MS,
-      });
-
-      if (!html || html.length < 500) {
-        const hint = cookie ? '' : ' (tip: set WELLFOUND_COOKIE in .env to get full results)';
-        throw new Error(`wellfound: response too short — Wellfound may require authentication${hint}`);
-      }
-
-      return parseJobsFromHtml(html);
-    },
+    return parseJobsFromHtml(html);
   },
 };

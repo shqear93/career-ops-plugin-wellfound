@@ -17,16 +17,7 @@ assert(keys.length > 0, 'declare at least one hook');
 for (const k of keys) assert(KINDS.includes(k), `unknown hook "${k}"`);
 for (const h of manifest.hooks) assert(keys.includes(h), `manifest declares hook "${h}" but index.mjs does not export it`);
 
-// Verify provider shape
-const p = hooks.provider;
-assert(p && typeof p === 'object', 'provider must be an object with id/detect/fetch');
-assert(typeof p.id === 'string', 'provider.id must be a string');
-assert(typeof p.detect === 'function', 'provider.detect must be a function');
-assert(typeof p.fetch === 'function', 'provider.fetch must be a function');
-
-// detect() must reject non-wellfound URLs
-assert(p.detect({ searchUrl: 'https://evil.com/?ref=wellfound.com' }) === null, 'detect must reject non-wellfound hostnames');
-assert(p.detect({ searchUrl: 'https://wellfound.com/jobs?remote=true' }) !== null, 'detect must accept wellfound.com');
-assert(p.detect({ searchUrl: 'https://www.wellfound.com/jobs' }) !== null, 'detect must accept www.wellfound.com');
+// Verify ingest shape
+assert(typeof hooks.ingest === 'function', 'ingest must be a function');
 
 console.log('✓ smoke ok:', keys.join(', '));
