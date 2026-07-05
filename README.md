@@ -14,10 +14,10 @@ on every scan. It works in two phases:
   Wellfound login carries over), connects via the Chrome DevTools Protocol,
   scrapes the rendered jobs page, and writes the results to
   `.wellfound-jobs.json` (project root, gitignored).
-- **Ingest (every scan, run by career-ops).** The plugin's `ingest` hook
+- **Provider (every scan, run by career-ops).** The plugin's `provider` hook
   (`index.mjs`) only ever reads `.wellfound-jobs.json`. It makes no network
-  calls, needs no `portals.yml` entry, and needs no API key or cookie in
-  `.env` — there's nothing to configure.
+  calls and needs no API key or cookie in `.env` — the only setup is a
+  `provider: wellfound` entry in `portals.yml`.
 
 The upshot: one occasional auth step keeps a local cache fresh, and every scan
 reads it instantly.
@@ -68,10 +68,18 @@ Confirm it's active:
 
 ```bash
 node plugins.mjs list
-# wellfound  [ingest]  — ✅ enabled
+# wellfound  [provider]  — ✅ enabled
 ```
 
-**3. Authenticate and fetch listings**
+**3. Add it to `portals.yml`**
+
+```yaml
+tracked_companies:
+  - name: "Wellfound — Global Remote"
+    provider: wellfound
+```
+
+**4. Authenticate and fetch listings**
 
 ```bash
 node plugins.local/wellfound/auth.mjs
@@ -92,18 +100,18 @@ Waiting for jobs to render...
 Found 9 global-remote jobs.
 ✓ 9 jobs cached to .wellfound-jobs.json
 
-Run:  node plugins.mjs run wellfound
+Run:  node scan.mjs
 ```
 
 ## Everyday use
 
-**Run the plugin** — reads `.wellfound-jobs.json` and feeds the listings into
-career-ops as job leads:
+**Run a normal scan** — `scan.mjs` reads `.wellfound-jobs.json` via the
+`provider: wellfound` entry and feeds the listings into career-ops as job leads,
+merged with every other source:
 
 ```bash
-node plugins.mjs run wellfound
+node scan.mjs
 # wellfound: loaded 10 jobs from cache
-# wellfound ingest: 10 found, 3 new.
 ```
 
 New listings flow into your normal career-ops pipeline from here — evaluate them
@@ -113,7 +121,7 @@ the same way as any other scanned offer.
 still works but logs a warning:
 
 ```
-wellfound: cache is 87h old — run auth.mjs to refresh
+wellfound: cache is 87h old
 ```
 
 Just re-run step 3 (`node plugins.local/wellfound/auth.mjs`) whenever you want
@@ -138,7 +146,7 @@ commit SHA can't — it always resolves to the exact code you're installing.
 - Returns only **global-remote** jobs (`Remote · Everywhere`)
 - `company` field is blank — employer name can't be reliably extracted from the
   listing page HTML
-- If `.wellfound-jobs.json` doesn't exist yet, the ingest hook logs a reminder
+- If `.wellfound-jobs.json` doesn't exist yet, the provider hook logs a reminder
   to run `auth.mjs` and returns no jobs (it won't error your scan)
 
 ## License

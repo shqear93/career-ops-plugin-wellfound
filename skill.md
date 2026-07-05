@@ -19,13 +19,23 @@ node plugins.local/wellfound/auth.mjs
 ```
 
 This writes `.wellfound-jobs.json`. Re-run it whenever you want fresh listings
-(the cache is good for 24 hours). No `portals.yml` entry, `.env`, or API key is
-needed — the ingest hook only reads the cache file.
+(the cache is good for 24 hours). No `.env` or API key is needed — the provider
+hook only reads the cache file.
 
 ## How to run it
 
+Add a `provider: wellfound` entry to `portals.yml`:
+
+```yaml
+tracked_companies:
+  - name: "Wellfound — Global Remote"
+    provider: wellfound
+```
+
+Then it runs automatically as part of your normal scan:
+
 ```bash
-node plugins.mjs run wellfound
+node scan.mjs
 ```
 
 ## What it produces
@@ -38,5 +48,6 @@ node plugins.mjs run wellfound
 
 ## Settings
 
-None. Authentication is handled by running `auth.mjs`, which reuses your logged-in
+The only setting is the `provider: wellfound` entry in `portals.yml`.
+Authentication is handled by running `auth.mjs`, which reuses your logged-in
 Chrome session — there are no env vars or secrets to configure.

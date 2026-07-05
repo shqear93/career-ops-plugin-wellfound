@@ -11,19 +11,22 @@ so the plugin **does not scrape on every scan**. Instead:
 - `auth.mjs` is a **standalone script the user runs manually**. It drives the
   user's real Chrome, scrapes the jobs page, and writes a local cache.
 - `index.mjs` is the **plugin hook career-ops calls**. It only ever reads that
-  cache — no network, no keys, no `portals.yml` entry.
+  cache — no network, no keys. It's a `provider` hook, keyed-style like `apify`:
+  it never auto-detects (`detect()` returns `null`), it only fires on an
+  explicit `provider: wellfound` entry in `portals.yml`, and it rides the host's
+  normal `node scan.mjs` run instead of a separate `plugins.mjs run` command.
 
 The split matters: never move scraping/browser/network logic into `index.mjs`,
-and never make the `ingest` hook do I/O beyond reading the cache file.
+and never make the `provider.fetch` hook do I/O beyond reading the cache file.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `index.mjs` | Plugin entry. Exports `default` object with an `ingest(ctx)` hook. Reads `.wellfound-jobs.json`, warns if >24h old, returns `Job[]`. |
+| `index.mjs` | Plugin entry. Exports `default` object with a `provider: { id, detect, fetch }` hook. `fetch` reads `.wellfound-jobs.json`, warns if >24h old, returns `Job[]`. |
 | `auth.mjs` | Manual CLI. Copies the Chrome profile, launches Chrome w/ CDP, scrapes jobs, writes the cache. No cookie/`.env` handling. |
-| `manifest.json` | Plugin metadata. `hooks: ["ingest"]`, `humanInTheLoop: true`, no env/hosts. |
-| `skill.md` | Skill text shipped to the user's AI tool. Describes the CDP-auth + ingest-cache flow. Update it if you touch the user-facing flow. |
+| `manifest.json` | Plugin metadata. `hooks: ["provider"]`, `humanInTheLoop: true`, no env/hosts. |
+| `skill.md` | Skill text shipped to the user's AI tool. Describes the CDP-auth + provider-cache flow. Update it if you touch the user-facing flow. |
 | `test/smoke.mjs` | Zero-network smoke test: imports `index.mjs`, checks hooks match manifest. |
 | `README.md` | Human setup/usage docs. |
 
@@ -58,9 +61,9 @@ Generated at runtime (gitignored, at the career-ops project **root**, not here):
 ## Verify changes
 
 ```bash
-node test/smoke.mjs            # fast, no network — always run this
-node auth.mjs                  # full manual run; opens Chrome, needs a logged-in Wellfound session
-node plugins.mjs run wellfound # from career-ops root, after auth
+node test/smoke.mjs   # fast, no network — always run this
+node auth.mjs         # full manual run; opens Chrome, needs a logged-in Wellfound session
+node scan.mjs          # from career-ops root, after auth, with a provider: wellfound portals.yml entry
 ```
 
 `smoke.mjs` is the only automated test. Run it after any change to `index.mjs`

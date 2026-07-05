@@ -17,7 +17,10 @@ assert(keys.length > 0, 'declare at least one hook');
 for (const k of keys) assert(KINDS.includes(k), `unknown hook "${k}"`);
 for (const h of manifest.hooks) assert(keys.includes(h), `manifest declares hook "${h}" but index.mjs does not export it`);
 
-// Verify ingest shape
-assert(typeof hooks.ingest === 'function', 'ingest must be a function');
+// Verify provider shape
+assert(hooks.provider && typeof hooks.provider === 'object', 'provider must be an object');
+assert(typeof hooks.provider.id === 'string', 'provider.id must be a string');
+assert(typeof hooks.provider.fetch === 'function', 'provider.fetch must be a function');
+assert(typeof hooks.provider.detect === 'function', 'provider.detect must be a function');
 
 console.log('✓ smoke ok:', keys.join(', '));
