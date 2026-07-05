@@ -37,6 +37,15 @@ Run these from your career-ops project root, in order.
 
 **1. Install the plugin**
 
+`--sha` must be a full 40-character commit hash (not a branch or tag — see
+[Why a commit SHA?](#why-a-commit-sha)). Get the latest one from this repo:
+
+```bash
+git ls-remote https://github.com/shqear93/career-ops-plugin-wellfound HEAD
+```
+
+Then install pinned to it:
+
 ```bash
 node plugins.mjs add shqear93/career-ops-plugin-wellfound --sha <commit-sha>
 ```
@@ -114,6 +123,15 @@ new listings — there's no need to reinstall or re-enable anything.
 
 **auth.mjs reports 0 jobs.** Make sure you're logged in to wellfound.com in your
 regular Chrome profile, then run it again.
+
+### Why a commit SHA?
+
+career-ops only trusts a curated registry of plugins by name; this plugin isn't
+in it (hence the "❓ community-unverified" label you'll see), so `add` requires
+an explicit `--sha`. It must be a full 40-character commit hash — career-ops
+rejects branch names and tags, and fetches with `--no-tags`, because a tag or
+branch can be moved to point at different code after you've reviewed it. A
+commit SHA can't — it always resolves to the exact code you're installing.
 
 ## Limitations
 
