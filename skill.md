@@ -10,27 +10,17 @@ Scrapes Wellfound's public job search page and returns global-remote job listing
 
 ## Setup
 
-Wellfound gates full results behind a login. For best results:
+Wellfound gates full results behind a login, so the plugin doesn't scrape live
+on every scan. Instead, run the standalone auth script — it drives your real,
+already-logged-in Chrome browser (via CDP) to fetch listings into a local cache:
 
-1. Log in to wellfound.com in your browser
-2. Open DevTools → Application → Cookies → `wellfound.com`
-3. Copy the value of the session cookie (usually `_session` or similar)
-4. Add it to your `.env`:
-   ```
-   WELLFOUND_COOKIE=<your-cookie-value>
-   ```
-
-Without a cookie the provider still runs but may return empty results.
-
-## portals.yml entry
-
-```yaml
-tracked_companies:
-  - name: Wellfound Remote Engineering
-    provider: wellfound
-    searchUrl: "https://wellfound.com/jobs?remote=true&keywords=platform+engineer&locationSlugs[]=everywhere"
-    enabled: true
+```bash
+node plugins.local/wellfound/auth.mjs
 ```
+
+This writes `.wellfound-jobs.json`. Re-run it whenever you want fresh listings
+(the cache is good for 24 hours). No `portals.yml` entry, `.env`, or API key is
+needed — the ingest hook only reads the cache file.
 
 ## How to run it
 
@@ -48,4 +38,5 @@ node plugins.mjs run wellfound
 
 ## Settings
 
-No non-secret settings. Authentication is handled via `WELLFOUND_COOKIE` in `.env`.
+None. Authentication is handled by running `auth.mjs`, which reuses your logged-in
+Chrome session — there are no env vars or secrets to configure.

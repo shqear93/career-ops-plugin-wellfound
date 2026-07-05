@@ -13,12 +13,11 @@ on every scan. It works in two phases:
   `--remote-debugging-port` (using a temp copy of your profile, so your existing
   Wellfound login carries over), connects via the Chrome DevTools Protocol,
   scrapes the rendered jobs page, and writes the results to
-  `.wellfound-jobs.json` (project root, gitignored). It also decrypts your
-  Wellfound cookies and writes them to `.env` as `WELLFOUND_COOKIE`.
+  `.wellfound-jobs.json` (project root, gitignored).
 - **Ingest (every scan, run by career-ops).** The plugin's `ingest` hook
   (`index.mjs`) only ever reads `.wellfound-jobs.json`. It makes no network
-  calls, needs no `portals.yml` entry, and doesn't read `WELLFOUND_COOKIE` — so
-  the cookie in `.env` is currently unused by the plugin itself.
+  calls, needs no `portals.yml` entry, and needs no API key or cookie in
+  `.env` — there's nothing to configure.
 
 The upshot: one occasional auth step keeps a local cache fresh, and every scan
 reads it instantly.
@@ -29,7 +28,8 @@ reads it instantly.
 - Google Chrome, installed and **logged in to wellfound.com**
 - Playwright available in your career-ops project: `npm i -D playwright`
   (skip if already installed)
-- macOS or Linux (auth.mjs reads Chrome's cookie store; Windows isn't supported)
+- **macOS only** — auth.mjs hardcodes the macOS Chrome binary path and profile
+  location. Linux and Windows aren't supported.
 
 ## Setup (one time)
 
@@ -68,15 +68,9 @@ node plugins.mjs list
 node plugins.local/wellfound/auth.mjs
 ```
 
-The first time you run this, macOS will pop up a password prompt — the script
-needs to read "Chrome Safe Storage" from your Keychain to decrypt Chrome's
-cookies. Enter your login password and click **Allow**, or **"Always Allow"** to
-skip the prompt on future runs. (See
-[Troubleshooting](#troubleshooting) for why.)
-
-It then copies your Chrome profile to a temp dir (so your existing Wellfound
-login carries over without a lock conflict), opens a Chrome window, navigates to
-the jobs page, and pulls out global-remote listings. You'll see output like:
+This copies your Chrome profile to a temp dir (so your existing Wellfound login
+carries over without a lock conflict), opens a Chrome window, navigates to the
+jobs page, and pulls out global-remote listings. You'll see output like:
 
 ```
 Copying Chrome profile to temp dir (this takes a few seconds)...
@@ -87,9 +81,6 @@ Connecting to Chrome via CDP...
 Navigating to https://wellfound.com/jobs?remote=true&locationSlugs[]=everywhere...
 Waiting for jobs to render...
 Found 9 global-remote jobs.
-
-Reading Wellfound cookies from Chrome...
-✓ 14 cookies saved to .env
 ✓ 9 jobs cached to .wellfound-jobs.json
 
 Run:  node plugins.mjs run wellfound
@@ -123,32 +114,6 @@ new listings — there's no need to reinstall or re-enable anything.
 
 **auth.mjs reports 0 jobs.** Make sure you're logged in to wellfound.com in your
 regular Chrome profile, then run it again.
-
-<details>
-<summary><strong>Why does macOS ask for my password during auth?</strong></summary>
-
-It's a macOS **Keychain** prompt (your login password), not `sudo` — no root
-access is involved. Here's the chain of why it's needed:
-
-1. **Chrome encrypts your cookies at rest.** They live in a SQLite file
-   (`~/Library/Application Support/Google/Chrome/Default/Cookies`), but the
-   values aren't plaintext — each is AES-128-CBC encrypted.
-
-2. **The encryption key isn't in that file.** It's derived from a secret Chrome
-   stores in your Keychain under the name **"Chrome Safe Storage"**. auth.mjs
-   reads that secret and PBKDF2-hashes it (with Chrome's well-known `saltysalt`
-   / 1003-iteration constants) to reconstruct the AES key.
-
-3. **macOS gates Keychain reads.** Because auth.mjs isn't Chrome itself, the OS
-   won't hand over the secret silently — it shows the password dialog so *you*
-   authorize this script to read it.
-
-That secret is the only way to decrypt the cookies, and the cookies are what let
-the script reuse your already-logged-in Wellfound session instead of asking you
-to log in again. Click **"Always Allow"** to store the authorization and skip
-the prompt on future runs; **"Allow"** grants it just once.
-
-</details>
 
 ## Limitations
 

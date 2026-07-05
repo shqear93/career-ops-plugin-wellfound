@@ -21,32 +21,29 @@ and never make the `ingest` hook do I/O beyond reading the cache file.
 | File | Role |
 |------|------|
 | `index.mjs` | Plugin entry. Exports `default` object with an `ingest(ctx)` hook. Reads `.wellfound-jobs.json`, warns if >24h old, returns `Job[]`. |
-| `auth.mjs` | Manual CLI. Launches Chrome w/ CDP, scrapes jobs, decrypts cookies from Chrome's SQLite store, writes `.env` + cache. |
+| `auth.mjs` | Manual CLI. Copies the Chrome profile, launches Chrome w/ CDP, scrapes jobs, writes the cache. No cookie/`.env` handling. |
 | `manifest.json` | Plugin metadata. `hooks: ["ingest"]`, `humanInTheLoop: true`, no env/hosts. |
-| `skill.md` | Skill text shipped to the user's AI tool. **Currently stale** — describes an old provider/`portals.yml`/manual-cookie flow, not the current CDP+ingest design. Update it if you touch the user-facing flow. |
+| `skill.md` | Skill text shipped to the user's AI tool. Describes the CDP-auth + ingest-cache flow. Update it if you touch the user-facing flow. |
 | `test/smoke.mjs` | Zero-network smoke test: imports `index.mjs`, checks hooks match manifest. |
 | `README.md` | Human setup/usage docs. |
 
-Generated at runtime (both gitignored, at the career-ops project **root**, not
-here): `.wellfound-jobs.json` (cache: `{ jobs, timestamp }`) and `.env`
-(`WELLFOUND_COOKIE`).
+Generated at runtime (gitignored, at the career-ops project **root**, not here):
+`.wellfound-jobs.json` (cache: `{ jobs, timestamp }`).
 
 ## Key facts an agent will get wrong otherwise
 
 - **Paths are relative to the career-ops root, not the plugin dir.** Both files
   compute `ROOT = resolve(HERE, '..', '..')` because the plugin is installed at
-  `plugins.local/wellfound/`. The cache and `.env` live at that root.
-- **The password prompt during auth is a macOS Keychain prompt, not `sudo`.**
-  `security find-generic-password ... "Chrome Safe Storage"` reads Chrome's
-  cookie-encryption secret; macOS gates that read. See the README's "Why does
-  macOS ask for my password?" section.
+  `plugins.local/wellfound/`. The cache lives at that root.
+- **No secrets, no Keychain, no `.env`.** Auth works purely by reusing the
+  logged-in Chrome session over CDP — there's no cookie decryption and no
+  password prompt. Don't reintroduce cookie/`.env` handling.
 - **Enabling requires `--confirm`.** `node plugins.mjs enable wellfound --confirm`
   — this is career-ops's trust-acknowledgement gate for any plugin, unrelated to
   `humanInTheLoop`.
-- **macOS/Linux only.** `auth.mjs` hardcodes the macOS Chrome binary path and
-  reads platform-specific cookie DB paths; Windows is unsupported and throws.
-- **Cookie decryption has a fallback path.** It tries `node:sqlite`
-  (`DatabaseSync`) first, then shells out to `sqlite3`. Preserve both.
+- **macOS only.** `auth.mjs` hardcodes the macOS Chrome binary path
+  (`/Applications/Google Chrome.app/...`) and profile dir
+  (`~/Library/Application Support/Google/Chrome/Default`); Linux/Windows unsupported.
 - **Only global-remote jobs.** `parseJobLinks` filters to listings whose
   surrounding HTML matches `everywhere|remote only`. `company` is intentionally
   blank (not reliably parseable). Don't "fix" these as if they were bugs.
@@ -62,7 +59,7 @@ here): `.wellfound-jobs.json` (cache: `{ jobs, timestamp }`) and `.env`
 
 ```bash
 node test/smoke.mjs            # fast, no network — always run this
-node auth.mjs                  # full manual run; opens Chrome, needs login + Keychain approval
+node auth.mjs                  # full manual run; opens Chrome, needs a logged-in Wellfound session
 node plugins.mjs run wellfound # from career-ops root, after auth
 ```
 
