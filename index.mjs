@@ -23,7 +23,7 @@ export default {
     detect() { return null; },
 
     /** @param {any} entry @param {any} ctx */
-    async fetch(entry, ctx) {
+    fetch: async (entry, ctx) => {
       if (!existsSync(JOBS_CACHE_PATH)) {
         ctx.log('wellfound: no job cache found (.wellfound-jobs.json missing)');
         return [];
