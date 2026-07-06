@@ -32,6 +32,7 @@ tracked_companies:
   - name: "Wellfound — Global Remote"
     provider: wellfound
     searchUrl: "https://wellfound.com/jobs?remote=true&locationSlugs[]=everywhere"
+    max_scrolls: 35   # optional — see Settings below
 ```
 
 Then it runs automatically as part of your normal scan:
@@ -57,3 +58,11 @@ past Wellfound's bot protection, so this is a deliberate tradeoff, not a bug.
 `provider: wellfound` + `searchUrl` in a `portals.yml` entry. Authentication is
 handled by running `auth.mjs` once, which logs in via a real browser to cache
 a session cookie — there are no env vars or API keys to configure.
+
+`max_scrolls` (optional, default `20`, hard cap `60`) — how many times to
+scroll before giving up on finding more results (each scroll waits on the
+actual job-count DOM signal, not a fixed sleep, so this bounds attempts, not
+time). Wellfound lazy-loads results via infinite scroll; a broad, multi-keyword
+`searchUrl` can have hundreds of matches and needs a higher `max_scrolls` than
+the default to avoid truncating the result set — a narrow, single-keyword
+search plateaus much sooner and the default is plenty.

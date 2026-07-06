@@ -89,6 +89,7 @@ tracked_companies:
   - name: "Wellfound — Global Remote"
     provider: wellfound
     searchUrl: "https://wellfound.com/jobs?remote=true&locationSlugs[]=everywhere"
+    max_scrolls: 35   # optional, default 20 — raise for broad multi-keyword searches
 ```
 
 **4. Authenticate**

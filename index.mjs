@@ -31,9 +31,22 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const COOKIE_CACHE_PATH = resolve(ROOT, '.wellfound-cookie.json');
 const MAX_COOKIE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — Wellfound sessions rotate
-const MAX_SCROLL_ATTEMPTS = 15; // hard cap so a broken page can't hang the scan
+// Scroll-count cap follows the same shape as the other providers' page-count
+// caps (e.g. providers/4dayweek.mjs's max_pages/DEFAULT_MAX_PAGES/MAX_PAGES_CAP):
+// a per-entry override, a sane default, and a hard ceiling. Empirically, a
+// broad multi-keyword search plateaus around 30 scrolls (540 jobs) — the
+// default gives headroom under that, the cap gives headroom over it.
+const DEFAULT_MAX_SCROLL_ATTEMPTS = 20;
+const MAX_SCROLL_ATTEMPTS_CAP = 60;
 const SCROLL_GROWTH_TIMEOUT_MS = 4000; // no new cards within this window = end of results
 const JOB_LINK_SELECTOR = 'a[href^="/jobs/"]';
+
+/** Resolve the scroll-attempt cap: a positive integer `max_scrolls` on the entry, capped. */
+function resolveMaxScrollAttempts(entry) {
+  const v = entry?.max_scrolls;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_SCROLL_ATTEMPTS_CAP);
+  return DEFAULT_MAX_SCROLL_ATTEMPTS;
+}
 
 /**
  * Parse salary range from job text like "$90k - $160k" or "$135k - $165k"
@@ -155,11 +168,13 @@ export default {
         // (waitForFunction polls internally and resolves the instant new
         // cards land) rather than a blind fixed sleep per scroll — so a fast
         // page finishes fast and a slow one still gets its full result set.
-        // A hard cap (MAX_SCROLL_ATTEMPTS) stops a broken page from hanging
-        // the scan; SCROLL_GROWTH_TIMEOUT_MS per attempt is what actually
-        // signals "no more results" (no growth within that window).
+        // A hard cap (max_scrolls, see resolveMaxScrollAttempts) stops a
+        // broken page from hanging the scan; SCROLL_GROWTH_TIMEOUT_MS per
+        // attempt is what actually signals "no more results" (no growth
+        // within that window).
+        const maxScrollAttempts = resolveMaxScrollAttempts(entry);
         let jobCount = await page.locator(JOB_LINK_SELECTOR).count();
-        for (let i = 0; i < MAX_SCROLL_ATTEMPTS; i++) {
+        for (let i = 0; i < maxScrollAttempts; i++) {
           await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
           try {
             await page.waitForFunction(
