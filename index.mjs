@@ -31,6 +31,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const COOKIE_CACHE_PATH = resolve(ROOT, '.wellfound-cookie.json');
 const MAX_COOKIE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — Wellfound sessions rotate
+const MAX_SCROLL_ATTEMPTS = 15; // matches the empirically-observed plateau point
+const SCROLL_PAUSE_MS = 1200; // let the next batch of GraphQL-backed cards render
 
 /**
  * Parse salary range from job text like "$90k - $160k" or "$135k - $165k"
@@ -145,6 +147,20 @@ export default {
         const page = await context.newPage();
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
         await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
+
+        // Wellfound lazy-loads results via infinite scroll — the initial
+        // render only has a fraction of the matches. Scroll until the job
+        // count stops growing (or a hard cap, so a slow/broken page can't
+        // hang the scan).
+        let jobCount = parseJobsFromHtml(await page.content()).length;
+        for (let i = 0; i < MAX_SCROLL_ATTEMPTS; i++) {
+          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+          await page.waitForTimeout(SCROLL_PAUSE_MS);
+          const newCount = parseJobsFromHtml(await page.content()).length;
+          if (newCount === jobCount) break;
+          jobCount = newCount;
+        }
+
         const html = await page.content();
         jobs = parseJobsFromHtml(html);
       } finally {

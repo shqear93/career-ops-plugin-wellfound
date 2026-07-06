@@ -1,7 +1,7 @@
 {
   "id": "wellfound",
   "name": "career-ops-plugin-wellfound",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "apiVersion": 1,
   "description": "Fetches Wellfound global-remote jobs live via a visible Playwright browser on every scan, authenticated with a session cookie. Run auth.mjs once to log in and cache the cookie.",
   "hooks": ["provider"],
