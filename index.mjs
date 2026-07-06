@@ -31,8 +31,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
 const COOKIE_CACHE_PATH = resolve(ROOT, '.wellfound-cookie.json');
 const MAX_COOKIE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — Wellfound sessions rotate
-const MAX_SCROLL_ATTEMPTS = 15; // matches the empirically-observed plateau point
-const SCROLL_PAUSE_MS = 1200; // let the next batch of GraphQL-backed cards render
+const MAX_SCROLL_ATTEMPTS = 15; // hard cap so a broken page can't hang the scan
+const SCROLL_GROWTH_TIMEOUT_MS = 4000; // no new cards within this window = end of results
+const JOB_LINK_SELECTOR = 'a[href^="/jobs/"]';
 
 /**
  * Parse salary range from job text like "$90k - $160k" or "$135k - $165k"
@@ -150,15 +151,26 @@ export default {
 
         // Wellfound lazy-loads results via infinite scroll — the initial
         // render only has a fraction of the matches. Scroll until the job
-        // count stops growing (or a hard cap, so a slow/broken page can't
-        // hang the scan).
-        let jobCount = parseJobsFromHtml(await page.content()).length;
+        // link count stops growing, waiting on the actual DOM signal
+        // (waitForFunction polls internally and resolves the instant new
+        // cards land) rather than a blind fixed sleep per scroll — so a fast
+        // page finishes fast and a slow one still gets its full result set.
+        // A hard cap (MAX_SCROLL_ATTEMPTS) stops a broken page from hanging
+        // the scan; SCROLL_GROWTH_TIMEOUT_MS per attempt is what actually
+        // signals "no more results" (no growth within that window).
+        let jobCount = await page.locator(JOB_LINK_SELECTOR).count();
         for (let i = 0; i < MAX_SCROLL_ATTEMPTS; i++) {
           await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-          await page.waitForTimeout(SCROLL_PAUSE_MS);
-          const newCount = parseJobsFromHtml(await page.content()).length;
-          if (newCount === jobCount) break;
-          jobCount = newCount;
+          try {
+            await page.waitForFunction(
+              ({ selector, prevCount }) => document.querySelectorAll(selector).length > prevCount,
+              { selector: JOB_LINK_SELECTOR, prevCount: jobCount },
+              { timeout: SCROLL_GROWTH_TIMEOUT_MS },
+            );
+          } catch {
+            break; // no growth within the timeout — reached the end of results
+          }
+          jobCount = await page.locator(JOB_LINK_SELECTOR).count();
         }
 
         const html = await page.content();
