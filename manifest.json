@@ -1,9 +1,9 @@
 {
   "id": "wellfound",
   "name": "career-ops-plugin-wellfound",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "apiVersion": 1,
-  "description": "Scrapes Wellfound global-remote jobs via your real Chrome browser (CDP). Run auth.mjs once to authenticate and cache listings; plugin hook reads the cache instantly.",
+  "description": "Fetches Wellfound global-remote jobs live via a visible Playwright browser on every scan, authenticated with a session cookie. Run auth.mjs once to log in and cache the cookie.",
   "hooks": ["provider"],
   "requiredEnv": [],
   "optionalEnv": [],

@@ -6,30 +6,32 @@ license: MIT
 
 # career-ops-plugin-wellfound
 
-Scrapes Wellfound's public job search page and returns global-remote job listings.
+Fetches Wellfound's global-remote job listings live via a visible Playwright
+browser, authenticated with a cached session cookie.
 
 ## Setup
 
-Wellfound gates full results behind a login, so the plugin doesn't scrape live
-on every scan. Instead, run the standalone auth script — it drives your real,
-already-logged-in Chrome browser (via CDP) to fetch listings into a local cache:
+Wellfound gates full results behind a login, and blocks headless browsers
+outright. Run the standalone auth script once — it drives a real, visible
+Chrome window purely to capture a session cookie:
 
 ```bash
 node plugins.local/wellfound/auth.mjs
 ```
 
-This writes `.wellfound-jobs.json`. Re-run it whenever you want fresh listings
-(the cache is good for 24 hours). No `.env` or API key is needed — the provider
-hook only reads the cache file.
+This writes `.wellfound-cookie.json`. Re-run it whenever the session goes
+stale (roughly every 24 hours). No `.env` or API key is needed — the provider
+hook fetches jobs live on every scan using this cookie.
 
 ## How to run it
 
-Add a `provider: wellfound` entry to `portals.yml`:
+Add a `provider: wellfound` entry to `portals.yml` with a `searchUrl`:
 
 ```yaml
 tracked_companies:
   - name: "Wellfound — Global Remote"
     provider: wellfound
+    searchUrl: "https://wellfound.com/jobs?remote=true&locationSlugs[]=everywhere"
 ```
 
 Then it runs automatically as part of your normal scan:
@@ -38,6 +40,9 @@ Then it runs automatically as part of your normal scan:
 node scan.mjs
 ```
 
+Expect a visible Chrome window per configured entry — headless doesn't get
+past Wellfound's bot protection, so this is a deliberate tradeoff, not a bug.
+
 ## What it produces
 
 `Job[]` — each entry has:
@@ -45,9 +50,10 @@ node scan.mjs
 - `url` — direct link to the job posting on wellfound.com
 - `company` — blank (employer name isn't reliably parseable from the listing page)
 - `location` — `"Remote · Everywhere"` (only global-remote jobs are returned)
+- `salary` — `{min, max, currency}` when parseable from the listing context, else `null`
 
 ## Settings
 
-The only setting is the `provider: wellfound` entry in `portals.yml`.
-Authentication is handled by running `auth.mjs`, which reuses your logged-in
-Chrome session — there are no env vars or secrets to configure.
+`provider: wellfound` + `searchUrl` in a `portals.yml` entry. Authentication is
+handled by running `auth.mjs` once, which logs in via a real browser to cache
+a session cookie — there are no env vars or API keys to configure.

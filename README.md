@@ -5,22 +5,35 @@ Wellfound's global-remote engineering job listings in your pipeline.
 
 ## How it works
 
-Wellfound gates full results behind a login, so this plugin doesn't scrape live
-on every scan. It works in two phases:
+Wellfound gates full results behind a login, and its Cloudflare/DataDome
+protection blocks headless browsers outright (verified: identical script,
+only the `headless` flag differed — 403 headless, 200 headed, every time). So
+this plugin splits auth from fetching, and fetching stays headed:
 
 - **Auth (occasional, run by you).** `auth.mjs` is a standalone script — not a
-  hook career-ops calls automatically. It launches Chrome with
-  `--remote-debugging-port` (using a temp copy of your profile, so your existing
-  Wellfound login carries over), connects via the Chrome DevTools Protocol,
-  scrapes the rendered jobs page, and writes the results to
-  `.wellfound-jobs.json` (project root, gitignored).
+  hook career-ops calls automatically. It launches Chrome, waits until you
+  reach the jobs page, and saves the session cookie to `.wellfound-cookie.json`
+  (project root, gitignored). It does not scrape jobs — auth is only auth.
 - **Provider (every scan, run by career-ops).** The plugin's `provider` hook
-  (`index.mjs`) only ever reads `.wellfound-jobs.json`. It makes no network
-  calls and needs no API key or cookie in `.env` — the only setup is a
+  (`index.mjs`) reads the cached cookie, launches a **visible** Playwright
+  browser, injects the cookie, and scrapes your `searchUrl` live — once per
   `provider: wellfound` entry in `portals.yml`.
 
-The upshot: one occasional auth step keeps a local cache fresh, and every scan
-reads it instantly.
+The upshot: log in once to get a session cookie, and every scan pops a
+(visible) browser window per configured entry to fetch fresh listings live.
+
+## A note on the security tradeoff
+
+career-ops' own plugin audit (`plugin-audit.mjs`) forbids importing
+`playwright` in a community plugin — its trust model expects automatically
+invoked hooks to egress only through the scoped, host-allowlisted `ctx.fetch`,
+not full browser automation. This plugin needs a real browser (headless
+doesn't get past Cloudflare), so `index.mjs` imports `playwright` as a plain,
+honest literal. Running `node plugins.mjs add` against this plugin will
+surface that audit finding — that's intentional, not a bug. This plugin is
+not registry-listed and isn't going to be; installing it means trusting the
+author with real browser automation running as part of your scans, same as
+running `auth.mjs` already does.
 
 ## Prerequisites
 
@@ -28,8 +41,6 @@ reads it instantly.
 - Google Chrome, installed and **logged in to wellfound.com**
 - Playwright available in your career-ops project: `npm i -D playwright`
   (skip if already installed)
-- **macOS only** — auth.mjs hardcodes the macOS Chrome binary path and profile
-  location. Linux and Windows aren't supported.
 
 ## Setup (one time)
 
@@ -61,8 +72,8 @@ node plugins.mjs enable wellfound --confirm
 career-ops requires `--confirm` to enable any plugin: running the command
 without it prints a summary of what the plugin does and the capabilities it
 grants, then asks you to re-run with `--confirm` to acknowledge. For an
-unverified community plugin like this one, that's your chance to review before
-trusting the author.
+unverified community plugin like this one — with real browser automation, not
+just scoped HTTP — that's your chance to review before trusting the author.
 
 Confirm it's active:
 
@@ -77,60 +88,55 @@ node plugins.mjs list
 tracked_companies:
   - name: "Wellfound — Global Remote"
     provider: wellfound
+    searchUrl: "https://wellfound.com/jobs?remote=true&locationSlugs[]=everywhere"
 ```
 
-**4. Authenticate and fetch listings**
+**4. Authenticate**
 
 ```bash
 node plugins.local/wellfound/auth.mjs
 ```
 
-This copies your Chrome profile to a temp dir (so your existing Wellfound login
-carries over without a lock conflict), opens a Chrome window, navigates to the
-jobs page, and pulls out global-remote listings. You'll see output like:
+This opens a Chrome window and waits until you reach the jobs page. You'll see
+output like:
 
 ```
-Copying Chrome profile to temp dir (this takes a few seconds)...
-Launching Chrome with remote debugging port...
-Waiting for Chrome to start...
-Chrome CDP port ready.
-Connecting to Chrome via CDP...
-Navigating to https://wellfound.com/jobs?remote=true&locationSlugs[]=everywhere...
-Waiting for jobs to render...
-Found 9 global-remote jobs.
-✓ 9 jobs cached to .wellfound-jobs.json
+Fresh browser open. Navigating to Wellfound login...
+Log in — the browser will close automatically once you reach /jobs.
 
-Run:  node scan.mjs
+✓ Reached /jobs. Saved 15 cookies to .wellfound-cookie.json.
 ```
 
 ## Everyday use
 
-**Run a normal scan** — `scan.mjs` reads `.wellfound-jobs.json` via the
-`provider: wellfound` entry and feeds the listings into career-ops as job leads,
-merged with every other source:
+**Run a normal scan** — `scan.mjs` uses the cached cookie to launch a visible
+browser per configured `provider: wellfound` entry, fetches your `searchUrl`
+live, and feeds the listings into career-ops as job leads, merged with every
+other source:
 
 ```bash
 node scan.mjs
-# wellfound: loaded 10 jobs from cache
+# wellfound: fetched 12 jobs live
 ```
 
-New listings flow into your normal career-ops pipeline from here — evaluate them
-the same way as any other scanned offer.
+Expect a Chrome window to pop up (briefly) for each wellfound entry in your
+`portals.yml` while this runs.
 
-**Refresh listings** — the cache is good for 24 hours. Past that, the plugin
-still works but logs a warning:
+**Refresh the session** — the cookie is good for roughly 24 hours (Wellfound
+sessions rotate). Past that, the plugin still tries the fetch but logs a
+warning:
 
 ```
-wellfound: cache is 87h old
+wellfound: session cookie is 30h old — if results look empty, re-run auth.mjs
 ```
 
-Just re-run step 3 (`node plugins.local/wellfound/auth.mjs`) whenever you want
-new listings — there's no need to reinstall or re-enable anything.
+Just re-run step 4 (`node plugins.local/wellfound/auth.mjs`) whenever the
+cookie goes stale — there's no need to reinstall or re-enable anything.
 
 ## Troubleshooting
 
-**auth.mjs reports 0 jobs.** Make sure you're logged in to wellfound.com in your
-regular Chrome profile, then run it again.
+**No jobs returned / results look empty.** Your session cookie has likely
+expired — re-run `node plugins.local/wellfound/auth.mjs` to log in again.
 
 ### Why a commit SHA?
 
@@ -146,8 +152,10 @@ commit SHA can't — it always resolves to the exact code you're installing.
 - Returns only **global-remote** jobs (`Remote · Everywhere`)
 - `company` field is blank — employer name can't be reliably extracted from the
   listing page HTML
-- If `.wellfound-jobs.json` doesn't exist yet, the provider hook logs a reminder
-  to run `auth.mjs` and returns no jobs (it won't error your scan)
+- If `.wellfound-cookie.json` doesn't exist yet, the provider hook logs a
+  reminder to run `auth.mjs` and returns no jobs (it won't error your scan)
+- A visible browser window pops up per configured entry, every scan — headless
+  doesn't work against Wellfound's bot protection
 
 ## License
 
